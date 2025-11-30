@@ -1,0 +1,289 @@
+!pip install mysql-connector-python
+!pip install reportlab
+
+## Importing Libraries
+import tkinter as tk
+from tkinter import messagebox, ttk
+import mysql.connector
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from datetime import datetime
+import smtplib
+from email.message import EmailMessage
+
+## DB Connectivity
+
+def connect_db():
+    try:
+        conn = mysql.connector.connect(
+            host="localhost",
+            user="root",
+            password="Rakesh@2000!",  # your MySQL password
+            database="user",          # your DB name
+            port=3306
+        )
+        return conn
+    except mysql.connector.Error as err:
+        messagebox.showerror("Database Error", f"Error: {err}")
+        return None
+
+## User Registration
+
+def register_user():
+    username = reg_user_var.get().strip()
+    password = reg_pass_var.get().strip()
+    confirm_pass = reg_conf_pass_var.get().strip()
+
+    if not username or not password or not confirm_pass:
+        messagebox.showwarning("Warning", "All fields are required!")
+        return
+
+    if password != confirm_pass:
+        messagebox.showerror("Error", "Passwords do not match!")
+        return
+
+    con = connect_db()
+    if con is None:
+        return
+    cur = con.cursor()
+    cur.execute("SELECT * FROM users WHERE username=%s", (username,))
+    result = cur.fetchone()
+
+    if result:
+        messagebox.showerror("Error", "Username already exists!")
+    else:
+        cur.execute("INSERT INTO users (username, password) VALUES (%s,%s)", (username, password))
+        con.commit()
+        messagebox.showinfo("Success", "Registration successful!")
+        reg_user_var.set("")
+        reg_pass_var.set("")
+        reg_conf_pass_var.set("")
+    con.close()
+
+## Login User
+
+def login_user():
+    username = login_user_var.get().strip()
+    password = login_pass_var.get().strip()
+
+    if not username or not password:
+        messagebox.showwarning("Warning", "All fields are required!")
+        return
+
+    con = connect_db()
+    if con is None:
+        return
+    cur = con.cursor()
+    cur.execute("SELECT password FROM users WHERE username=%s", (username,))
+    result = cur.fetchone()
+
+    if result is None:
+        messagebox.showerror("Error", "Username not found!")
+    else:
+        if password == result[0]:
+            messagebox.showinfo("Success", f"Welcome {username}!")
+            root.after(200, open_patient_form)
+        else:
+            messagebox.showerror("Error", "Incorrect Password")
+    con.close()
+
+def send_email(receiver, pdf_path):
+    sender = "balurakesh2000@gmail.com"
+    app_pass = "xqyt aflv exfh jggy"  # Gmail App Password
+
+    msg = EmailMessage()
+    msg["Subject"] = "Your Patient Report"
+    msg["From"] = sender
+    msg["To"] = receiver
+    msg.set_content("Please find your patient report attached.")
+
+    try:
+        with open(pdf_path, "rb") as f:
+            msg.add_attachment(f.read(), maintype="application", subtype="pdf", filename=pdf_path)
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(sender, app_pass)
+            smtp.send_message(msg)
+
+        messagebox.showinfo("Success", f"Report sent to {receiver} successfully!")
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to send email: {e}")
+
+## Patient Priscription Form
+
+def open_patient_form():
+    form = tk.Toplevel(root)
+    form.title("Patient Form")
+    form.geometry("400x700")  # Increased height to fit button
+
+    tk.Label(form, text="Patient Details", font=("Arial", 18)).pack(pady=10)
+
+    labels = ["Name", "Age", "Gender", "Symptoms", "Diagnosis", "Prescription", "Email"]
+    entries = {}
+
+    for label in labels:
+        tk.Label(form, text=label + ":").pack()
+
+        if label == "Gender":
+            entry = ttk.Combobox(form, values=["Male", "Female", "Other"], state="readonly")
+            entry.set("Select Gender")
+            entry.pack(pady=3)
+
+        elif label == "Age":
+            entry = ttk.Combobox(form, values=list(range(1, 101)), state="readonly")
+            entry.set("Select Age")
+            entry.pack(pady=3)
+
+        else:
+            entry = tk.Entry(form)
+            entry.pack(pady=3)
+            entries[label] = entry
+
+    def submit_data():
+        name = entries["Name"].get().strip()
+        age = entries["Age"].get().strip()
+        gender = entries["Gender"].get().strip()
+        symptoms = entries["Symptoms"].get().strip()
+        diagnosis = entries["Diagnosis"].get().strip()
+        prescription = entries["Prescription"].get().strip()
+        email = entries["Email"].get().strip()
+
+        if not (name and age and gender and symptoms and diagnosis and prescription and email):
+            messagebox.showwarning("Warning", "All fields are required!")
+            return
+
+        # Insert into DB
+        con = connect_db()
+        if con is None:
+            return
+        cur = con.cursor()
+        cur.execute(
+            "INSERT INTO patient_reports (name, age, gender, symptoms, diagnosis, prescription, email) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            (name, age, gender, symptoms, diagnosis, prescription, email)
+        )
+        con.commit()
+        con.close()
+
+        # Generate PDF
+        pdf_file = f"{name}_prescription.pdf"
+        c = canvas.Canvas(pdf_file, pagesize=A4)
+        width, height = A4
+
+        # HEADER
+        c.setFillColor(colors.HexColor("#003366"))
+        c.rect(0, height-80, width, 80, fill=1)
+        c.setFillColor(colors.white)
+        c.setFont("Helvetica-Bold", 18)
+        c.drawString(50, height-50, "SUNRISE MULTI-SPECIALITY HOSPITAL")
+        c.setFont("Helvetica", 11)
+        c.drawString(50, height-70, "24/7 Health Care | Hyderabad, India | Ph: +91 98765 43210")
+        c.setFillColor(colors.black)
+        c.line(40, height-90, width-40, height-90)
+
+        # DOCTOR INFO
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(50, height-110, "Dr. Kiran Kumar")
+        c.setFont("Helvetica", 12)
+        c.drawString(50, height-130, "MBBS, MD - General Physician")
+        c.drawString(width-180, height-110, f"Date: {datetime.now().strftime('%d-%m-%Y')}")
+
+        # PATIENT INFO BOX
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(50, height-160, "Patient Information")
+        c.rect(45, height-310, width-90, 140)
+        c.setFont("Helvetica", 12)
+        c.drawString(60, height-185, f"Name       : {name}")
+        c.drawString(60, height-205, f"Age        : {age}")
+        c.drawString(60, height-225, f"Gender     : {gender}")
+        c.drawString(60, height-245, f"Symptoms   : {symptoms}")
+
+        # DIAGNOSIS
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(50, height-330, "Diagnosis")
+        c.line(40, height-340, width-40, height-340)
+        diag = c.beginText(50, height-360)
+        diag.setFont("Helvetica", 12)
+        for line in diagnosis.splitlines():
+            diag.textLine(line)
+        c.drawText(diag)
+
+        # PRESCRIPTION
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(50, height-450, "Prescription")
+        c.line(40, height-460, width-40, height-460)
+        pres = c.beginText(50, height-480)
+        pres.setFont("Helvetica", 12)
+        for line in prescription.splitlines():
+            pres.textLine(line)
+        c.drawText(pres)
+
+        # SIGNATURE
+        c.setFont("Helvetica", 12)
+        c.drawString(width-200, 130, "Doctor Signature")
+        c.line(width-200, 120, width-60, 120)
+
+        # FOOTER
+        c.line(40, 90, width-40, 90)
+        c.setFont("Helvetica", 9)
+        c.drawString(50, 75, "This is a system-generated prescription. No signature required.")
+        c.drawString(50, 60, "For emergencies: call +91 98765 43210")
+
+        c.save()
+
+        #  Send PDF via email
+        try:
+            send_email(email, pdf_file)
+            messagebox.showinfo("Success", "Patient report saved and email sent successfully!")
+        except Exception as e:
+            messagebox.showerror("Error", f"Report saved but failed to send email:\n{e}")
+
+    #  Add Submit Button at the end
+    tk.Button(form, text="Submit", command=submit_data,
+              bg="green", fg="white", font=("Arial", 12, "bold"), width=15).pack(pady=20)
+
+# UI for Login & Register New User
+
+root = tk.Tk()
+root.title("Login & Register System")
+root.geometry("400x300")
+
+tabControl = ttk.Notebook(root)
+login_tab = ttk.Frame(tabControl)
+register_tab = ttk.Frame(tabControl)
+tabControl.add(login_tab, text='Login')
+tabControl.add(register_tab, text='Register')
+tabControl.pack(expand=1, fill="both")
+
+# LOGIN UI
+tk.Label(login_tab, text="Username:", font=("Arial", 12)).pack(pady=5)
+login_user_var = tk.StringVar()
+tk.Entry(login_tab, textvariable=login_user_var).pack(pady=5)
+
+tk.Label(login_tab, text="Password:", font=("Arial", 12)).pack(pady=5)
+login_pass_var = tk.StringVar()
+tk.Entry(login_tab, textvariable=login_pass_var, show="*").pack(pady=5)
+
+tk.Button(login_tab, text="Login", command=login_user, bg="#4CAF50", fg="white").pack(pady=10)
+
+# REGISTER UI
+tk.Label(register_tab, text="New Username:", font=("Arial", 12)).pack(pady=5)
+reg_user_var = tk.StringVar()
+tk.Entry(register_tab, textvariable=reg_user_var).pack(pady=5)
+
+tk.Label(register_tab, text="New Password:", font=("Arial", 12)).pack(pady=5)
+reg_pass_var = tk.StringVar()
+tk.Entry(register_tab, textvariable=reg_pass_var, show="*").pack(pady=5)
+
+tk.Label(register_tab, text="Confirm Password:", font=("Arial", 12)).pack(pady=5)
+reg_conf_pass_var = tk.StringVar()
+tk.Entry(register_tab, textvariable=reg_conf_pass_var, show="*").pack(pady=5)
+
+tk.Button(register_tab, text="Register", command=register_user, bg="#2196F3", fg="white").pack(pady=10)
+
+
+## Run Loop
+
+root.mainloop()
+
